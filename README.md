@@ -14,7 +14,7 @@ When ChatGPT is busy generating a response, you can't normally send another mess
 
 ## How to install
 
-1. Download or clone this repository
+1. Clone this repository or [download the zip file](https://github.com/HartreeWorks/chatgpt-queue/archive/refs/heads/main.zip)
 2. Open Chrome and go to `chrome://extensions/`
 3. Enable **Developer mode** (toggle in top right)
 4. Click **Load unpacked**
