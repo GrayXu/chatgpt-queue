@@ -434,22 +434,18 @@
     el.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
-  // Intercept message submission
+  // Intercept message submission using event delegation
   function interceptSubmission() {
-    const form = document.querySelector(SELECTORS.inputForm);
-    const inputEl = document.querySelector(SELECTORS.textarea);
-    const sendButton = document.querySelector(SELECTORS.sendButton);
-
-    if (!form || !inputEl) {
-      console.log('[ChatGPT Queue] Form or input not found, retrying...');
-      setTimeout(interceptSubmission, 1000);
-      return;
-    }
-
-    console.log('[ChatGPT Queue] Input element type:', inputEl.tagName, 'contenteditable:', inputEl.getAttribute('contenteditable'));
+    // Use event delegation on document to handle dynamically recreated elements
 
     // Intercept form submission
-    form.addEventListener('submit', (e) => {
+    document.addEventListener('submit', (e) => {
+      const form = e.target.closest(SELECTORS.inputForm);
+      if (!form) return;
+
+      const inputEl = document.querySelector(SELECTORS.textarea);
+      if (!inputEl) return;
+
       const inputValue = getInputValue(inputEl);
       console.log('[ChatGPT Queue] Form submit intercepted, isGenerating:', isGenerating, 'value:', inputValue.substring(0, 50));
       if (isGenerating && inputValue.trim()) {
@@ -461,37 +457,47 @@
       }
     }, true);
 
-    // Intercept Enter key on the input element
-    inputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        const inputValue = getInputValue(inputEl);
-        console.log('[ChatGPT Queue] Enter key pressed, isGenerating:', isGenerating, 'value:', inputValue.substring(0, 50));
-        if (isGenerating && inputValue.trim()) {
-          e.preventDefault();
-          e.stopPropagation();
-          addToQueue(inputValue);
-          clearInput(inputEl);
-          return false;
-        }
+    // Intercept Enter key using document-level delegation
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.shiftKey) return;
+
+      const inputEl = document.querySelector(SELECTORS.textarea);
+      if (!inputEl) return;
+
+      // Check if the event target is within the textarea
+      if (!inputEl.contains(e.target) && e.target !== inputEl) return;
+
+      const inputValue = getInputValue(inputEl);
+      console.log('[ChatGPT Queue] Enter key pressed, isGenerating:', isGenerating, 'value:', inputValue.substring(0, 50));
+      if (isGenerating && inputValue.trim()) {
+        e.preventDefault();
+        e.stopPropagation();
+        addToQueue(inputValue);
+        clearInput(inputEl);
+        return false;
       }
     }, true);
 
-    // Intercept send button click
-    if (sendButton) {
-      sendButton.addEventListener('click', (e) => {
-        const inputValue = getInputValue(inputEl);
-        console.log('[ChatGPT Queue] Send button clicked, isGenerating:', isGenerating, 'value:', inputValue.substring(0, 50));
-        if (isGenerating && inputValue.trim()) {
-          e.preventDefault();
-          e.stopPropagation();
-          addToQueue(inputValue);
-          clearInput(inputEl);
-          return false;
-        }
-      }, true);
-    }
+    // Intercept send button click using delegation
+    document.addEventListener('click', (e) => {
+      const sendButton = e.target.closest(SELECTORS.sendButton);
+      if (!sendButton) return;
 
-    console.log('[ChatGPT Queue] Submission interception set up');
+      const inputEl = document.querySelector(SELECTORS.textarea);
+      if (!inputEl) return;
+
+      const inputValue = getInputValue(inputEl);
+      console.log('[ChatGPT Queue] Send button clicked, isGenerating:', isGenerating, 'value:', inputValue.substring(0, 50));
+      if (isGenerating && inputValue.trim()) {
+        e.preventDefault();
+        e.stopPropagation();
+        addToQueue(inputValue);
+        clearInput(inputEl);
+        return false;
+      }
+    }, true);
+
+    console.log('[ChatGPT Queue] Submission interception set up (using event delegation)');
   }
 
   // Send the next queued message

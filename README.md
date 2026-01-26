@@ -2,6 +2,8 @@
 
 A Chrome extension that lets you queue follow-up messages while ChatGPT is generating a response.
 
+![ChatGPT Message Queue screenshot](chatgpt-queue.jpeg)
+
 ## What it does
 
 When ChatGPT is busy generating a response, you can't normally send another message. This extension solves that by:
