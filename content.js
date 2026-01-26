@@ -227,7 +227,20 @@
 
   // Update the queue UI display
   function updateQueueUI() {
-    if (!queueUI) return;
+    if (!queueUI) {
+      createQueueUI();
+      return;
+    }
+
+    // Re-insert if removed from DOM
+    if (!document.body.contains(queueUI)) {
+      const form = document.querySelector(SELECTORS.inputForm);
+      if (form && form.parentElement) {
+        form.parentElement.insertBefore(queueUI, form.nextSibling);
+      } else {
+        document.body.appendChild(queueUI);
+      }
+    }
 
     const list = queueUI.querySelector('.queue-list');
     const count = queueUI.querySelector('.queue-count');
