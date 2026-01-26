@@ -29,14 +29,6 @@ When ChatGPT is busy generating a response, you can't normally send another mess
    - Click the **Queue** button that appears next to the stop button
 4. Your message will be sent automatically when the response completes
 
-## Files
-
-- `manifest.json` - Extension configuration
-- `content.js` - Main logic (detection, interception, queue management)
-- `styles.css` - Native-feeling UI styles
-- `popup.html/js` - Popup for managing the queue
-- `background.js` - Badge updates
-
 ## License
 
 MIT
