@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChatGPT Queue</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      width: 320px;
+      min-height: 200px;
+      max-height: 500px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a1a;
+      color: #e5e7eb;
+      padding: 16px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #10a37f;
+    }
+
+    .status {
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .status.generating {
+      background: rgba(245, 158, 11, 0.2);
+      color: #f59e0b;
+    }
+
+    .status.idle {
+      background: rgba(16, 163, 127, 0.2);
+      color: #10a37f;
+    }
+
+    .conversation-id {
+      font-size: 11px;
+      color: #6b7280;
+      margin-bottom: 12px;
+    }
+
+    .queue-list {
+      max-height: 300px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+    }
+
+    .queue-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+
+    .queue-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .queue-item-number {
+      color: #10a37f;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .queue-item-content {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .queue-item-text {
+      font-size: 13px;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    .queue-item-actions {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .queue-item-actions button {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+      font-size: 12px;
+      border-radius: 4px;
+      opacity: 0.6;
+      transition: opacity 0.2s, background 0.2s;
+    }
+
+    .queue-item-actions button:hover {
+      opacity: 1;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 24px;
+      color: #6b7280;
+    }
+
+    .empty-state p {
+      margin-bottom: 8px;
+    }
+
+    .empty-state small {
+      font-size: 11px;
+      opacity: 0.7;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .actions button {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .clear-btn {
+      background: rgba(239, 68, 68, 0.2);
+      color: #ef4444;
+    }
+
+    .clear-btn:hover {
+      background: rgba(239, 68, 68, 0.3);
+    }
+
+    .clear-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .not-on-chatgpt {
+      text-align: center;
+      padding: 24px;
+      color: #6b7280;
+    }
+
+    .not-on-chatgpt a {
+      color: #10a37f;
+      text-decoration: none;
+    }
+
+    .not-on-chatgpt a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div id="content">
+    <div class="not-on-chatgpt">
+      <p>Loading...</p>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
