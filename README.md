@@ -9,18 +9,8 @@ When ChatGPT is busy generating a response, you can't normally send another mess
 - **Intercepting messages** sent while ChatGPT is generating
 - **Queueing them locally** with per-conversation storage
 - **Automatically sending** queued messages once the response completes
-- **Preserving your draft** if you're typing when a queued message is dispatched
 
-## Features
-
-- Queue button appears next to the stop button when you start typing during generation
-- Inline queue UI shows queued messages (hidden when empty)
-- Edit, delete, or reorder queued messages
-- Badge shows queue count
-- Queue persists across page refreshes (localStorage)
-- Separate queues per conversation
-
-## Manual installation
+## How to install
 
 1. Download or clone this repository
 2. Open Chrome and go to `chrome://extensions/`
