@@ -9,10 +9,43 @@
   let isGenerating = false;
   let conversationId = null;
   let observer = null;
+  let observedContainer = null;
   let queueUI = null;
   let queueButton = null;
   let inputObserver = null;
   let dispatchDelay = 500; // ms delay before sending next message
+  let dispatchTimeoutId = null;
+  let fallbackPollerId = null;
+  let dispatchInProgress = false;
+  let dispatchInProgressTimeoutId = null;
+
+  const LOG_LEVEL = {
+    error: 0,
+    warn: 1,
+    info: 2,
+    debug: 3,
+  };
+
+  function getLogLevel() {
+    const raw = localStorage.getItem('chatgpt-queue-log-level');
+    if (raw === null || raw === undefined || raw === '') return LOG_LEVEL.info;
+    const parsed = Number(raw);
+    if (Number.isNaN(parsed)) return LOG_LEVEL.info;
+    return Math.max(LOG_LEVEL.error, Math.min(LOG_LEVEL.debug, parsed));
+  }
+
+  function logAt(level, ...args) {
+    if (getLogLevel() < level) return;
+    const prefix = '[ChatGPT Queue]';
+    if (level <= LOG_LEVEL.error) console.error(prefix, ...args);
+    else if (level <= LOG_LEVEL.warn) console.warn(prefix, ...args);
+    else console.log(prefix, ...args);
+  }
+
+  function logInfo(...args) { logAt(LOG_LEVEL.info, ...args); }
+  function logWarn(...args) { logAt(LOG_LEVEL.warn, ...args); }
+  function logError(...args) { logAt(LOG_LEVEL.error, ...args); }
+  function logDebug(...args) { logAt(LOG_LEVEL.debug, ...args); }
 
   // Selectors for ChatGPT DOM elements (may need updating if ChatGPT changes)
   const SELECTORS = {
@@ -27,6 +60,95 @@
     // Form containing the input
     inputForm: 'form',
   };
+
+  function markDispatchInProgress() {
+    dispatchInProgress = true;
+    if (dispatchInProgressTimeoutId) {
+      clearTimeout(dispatchInProgressTimeoutId);
+    }
+    // Safety valve: if ChatGPT doesn't enter generating state, allow retry later.
+    dispatchInProgressTimeoutId = setTimeout(() => {
+      if (!dispatchInProgress) {
+        dispatchInProgressTimeoutId = null;
+        return;
+      }
+
+      const stillGenerating = checkGeneratingState();
+      dispatchInProgress = false;
+      dispatchInProgressTimeoutId = null;
+
+      // If we already entered generating, this timeout is just a stale cleanup (don't warn).
+      if (!stillGenerating) {
+        logWarn('Dispatch attempt did not trigger generating; unlocking for retry');
+      } else {
+        logDebug('Dispatch lock cleanup while generating (no-op)');
+      }
+    }, 3000);
+  }
+
+  function clearDispatchInProgress(reason) {
+    if (!dispatchInProgress && !dispatchInProgressTimeoutId) return;
+    dispatchInProgress = false;
+    if (dispatchInProgressTimeoutId) {
+      clearTimeout(dispatchInProgressTimeoutId);
+      dispatchInProgressTimeoutId = null;
+    }
+    if (reason) logDebug('Cleared dispatchInProgress', { reason });
+  }
+
+  function scheduleDispatch(reason) {
+    if (dispatchTimeoutId) return;
+    if (dispatchInProgress) return;
+    if (messageQueue.length === 0) return;
+    if (checkGeneratingState()) return;
+    if (!document.querySelector(SELECTORS.textarea)) {
+      logWarn('scheduleDispatch skipped: textarea not found', { reason, queueLength: messageQueue.length });
+      return;
+    }
+
+    dispatchTimeoutId = setTimeout(() => {
+      dispatchTimeoutId = null;
+      if (dispatchInProgress) return;
+      if (!checkGeneratingState() && messageQueue.length > 0) {
+        logInfo('Dispatching from scheduler', { reason, queueLength: messageQueue.length });
+        dispatchNextMessage();
+      }
+    }, dispatchDelay);
+  }
+
+  function refreshGeneratingStateAndMaybeDispatch(source) {
+    const wasGenerating = isGenerating;
+    const nowGenerating = checkGeneratingState();
+
+    isGenerating = nowGenerating;
+
+    if (queueUI) {
+      queueUI.classList.toggle('generating', isGenerating);
+    }
+    updateQueueButton();
+
+    if (wasGenerating !== nowGenerating) {
+      logInfo('Generating state changed', {
+        from: wasGenerating,
+        to: nowGenerating,
+        source,
+        queueLength: messageQueue.length,
+        conversationId,
+        url: location.href
+      });
+    }
+
+    // If a queued message was just dispatched, entering generating means the click/Enter "took".
+    if (!wasGenerating && nowGenerating) {
+      clearDispatchInProgress('entered_generating');
+    }
+
+    // If we miss the "generating -> idle" mutation (ChatGPT DOM changes / container replacement),
+    // ensure we still drain the queue once idle.
+    if (!isGenerating && messageQueue.length > 0) {
+      scheduleDispatch(`idle(${source})`);
+    }
+  }
 
   // Extract conversation ID from URL
   function getConversationId() {
@@ -48,6 +170,7 @@
     }
     updateQueueUI();
     updateBadge();
+    logInfo('Queue loaded', { conversationId, queueLength: messageQueue.length });
   }
 
   // Save queue to localStorage
@@ -58,10 +181,14 @@
 
   // Update extension badge with queue count
   function updateBadge() {
-    chrome.runtime.sendMessage({
-      type: 'updateBadge',
-      count: messageQueue.length
-    });
+    try {
+      chrome.runtime.sendMessage({
+        type: 'updateBadge',
+        count: messageQueue.length
+      });
+    } catch (e) {
+      logWarn('Failed to update badge', e);
+    }
   }
 
   // Check if ChatGPT is currently generating a response
@@ -317,14 +444,17 @@
     saveQueue();
     updateQueueUI();
     showNotification(`Message queued (${messageQueue.length} in queue)`);
+    logInfo('Message queued', { conversationId, queueLength: messageQueue.length, preview: message.trim().slice(0, 80) });
   }
 
   // Remove message from queue
   function removeFromQueue(index) {
     if (index >= 0 && index < messageQueue.length) {
+      const removed = messageQueue[index];
       messageQueue.splice(index, 1);
       saveQueue();
       updateQueueUI();
+      logInfo('Removed queued message', { conversationId, index, queueLength: messageQueue.length, preview: (removed || '').slice(0, 80) });
     }
   }
 
@@ -336,6 +466,7 @@
       messageQueue[index] = newText.trim();
       saveQueue();
       updateQueueUI();
+      logInfo('Edited queued message', { conversationId, index, queueLength: messageQueue.length });
     }
   }
 
@@ -346,6 +477,7 @@
       messageQueue.splice(toIndex, 0, item);
       saveQueue();
       updateQueueUI();
+      logInfo('Moved queued message', { conversationId, fromIndex, toIndex, queueLength: messageQueue.length });
     }
   }
 
@@ -447,7 +579,7 @@
       if (!inputEl) return;
 
       const inputValue = getInputValue(inputEl);
-      console.log('[ChatGPT Queue] Form submit intercepted, isGenerating:', isGenerating, 'value:', inputValue.substring(0, 50));
+      logDebug('Form submit intercepted', { isGenerating, preview: inputValue.substring(0, 50) });
       if (isGenerating && inputValue.trim()) {
         e.preventDefault();
         e.stopPropagation();
@@ -468,7 +600,7 @@
       if (!inputEl.contains(e.target) && e.target !== inputEl) return;
 
       const inputValue = getInputValue(inputEl);
-      console.log('[ChatGPT Queue] Enter key pressed, isGenerating:', isGenerating, 'value:', inputValue.substring(0, 50));
+      logDebug('Enter key pressed', { isGenerating, preview: inputValue.substring(0, 50) });
       if (isGenerating && inputValue.trim()) {
         e.preventDefault();
         e.stopPropagation();
@@ -487,7 +619,7 @@
       if (!inputEl) return;
 
       const inputValue = getInputValue(inputEl);
-      console.log('[ChatGPT Queue] Send button clicked, isGenerating:', isGenerating, 'value:', inputValue.substring(0, 50));
+      logDebug('Send button clicked', { isGenerating, preview: inputValue.substring(0, 50) });
       if (isGenerating && inputValue.trim()) {
         e.preventDefault();
         e.stopPropagation();
@@ -497,13 +629,14 @@
       }
     }, true);
 
-    console.log('[ChatGPT Queue] Submission interception set up (using event delegation)');
+    logInfo('Submission interception set up (event delegation)');
   }
 
   // Send the next queued message
   function dispatchNextMessage() {
-    if (messageQueue.length === 0 || isGenerating) return;
+    if (messageQueue.length === 0 || isGenerating || dispatchInProgress) return;
 
+    const queueLengthBefore = messageQueue.length;
     const message = messageQueue.shift();
     saveQueue();
     updateQueueUI();
@@ -511,7 +644,7 @@
     const inputEl = document.querySelector(SELECTORS.textarea);
 
     if (!inputEl) {
-      console.error('[ChatGPT Queue] Input element not found for dispatch');
+      logError('Input element not found for dispatch', { conversationId, queueLength: messageQueue.length });
       // Put message back at front of queue
       messageQueue.unshift(message);
       saveQueue();
@@ -523,10 +656,15 @@
     // Save any text the user is currently typing
     const userDraftText = getInputValue(inputEl);
     if (userDraftText.trim()) {
-      console.log('[ChatGPT Queue] Saving user draft:', userDraftText.substring(0, 50));
+      logDebug('Saving user draft', { preview: userDraftText.substring(0, 50) });
     }
 
-    console.log('[ChatGPT Queue] Dispatching message:', message.substring(0, 50));
+    logInfo('Dispatching queued message', {
+      conversationId,
+      queueLengthBefore,
+      queueLengthAfter: messageQueue.length,
+      preview: message.substring(0, 80)
+    });
 
     // Set the input value
     setInputValue(inputEl, message);
@@ -541,7 +679,7 @@
             // Only restore if the input is now empty (message was sent)
             const currentValue = getInputValue(currentInput);
             if (!currentValue.trim()) {
-              console.log('[ChatGPT Queue] Restoring user draft');
+              logDebug('Restoring user draft');
               setInputValue(currentInput, userDraftText);
             }
           }
@@ -553,14 +691,15 @@
     setTimeout(() => {
       // Check if the input has the text
       const currentValue = getInputValue(inputEl);
-      console.log('[ChatGPT Queue] Input value after setting:', currentValue.substring(0, 50));
+      logDebug('Input value after setting', { preview: currentValue.substring(0, 50), length: currentValue.length });
 
       const currentSendButton = document.querySelector(SELECTORS.sendButton);
-      console.log('[ChatGPT Queue] Send button found:', !!currentSendButton, 'disabled:', currentSendButton?.disabled);
+      logDebug('Send button state', { found: !!currentSendButton, disabled: !!currentSendButton?.disabled });
 
       if (currentSendButton && !currentSendButton.disabled) {
+        markDispatchInProgress();
         currentSendButton.click();
-        console.log('[ChatGPT Queue] Clicked send button');
+        logInfo('Clicked send button for queued message');
         showNotification(`Sent queued message (${messageQueue.length} remaining)`);
         restoreUserDraft();
       } else {
@@ -568,13 +707,15 @@
         setTimeout(() => {
           const retryButton = document.querySelector(SELECTORS.sendButton);
           if (retryButton && !retryButton.disabled) {
+            markDispatchInProgress();
             retryButton.click();
-            console.log('[ChatGPT Queue] Clicked send button (retry)');
+            logInfo('Clicked send button for queued message (retry)');
             showNotification(`Sent queued message (${messageQueue.length} remaining)`);
             restoreUserDraft();
           } else {
             // Try pressing Enter as last resort
-            console.log('[ChatGPT Queue] Trying Enter key as fallback');
+            logWarn('Send button unavailable; trying Enter key fallback');
+            markDispatchInProgress();
             inputEl.focus();
             inputEl.dispatchEvent(new KeyboardEvent('keydown', {
               key: 'Enter',
@@ -596,33 +737,27 @@
   function setupObserver() {
     const container = document.querySelector(SELECTORS.chatContainer);
     if (!container) {
-      console.log('[ChatGPT Queue] Chat container not found, retrying...');
+      logWarn('Chat container not found, retrying...');
       setTimeout(setupObserver, 1000);
       return;
     }
 
+    if (observer && observedContainer === container) {
+      return;
+    }
+
+    if (observer) {
+      try {
+        observer.disconnect();
+      } catch (e) {
+        // ignore
+      }
+      observer = null;
+      observedContainer = null;
+    }
+
     observer = new MutationObserver((mutations) => {
-      const wasGenerating = isGenerating;
-      isGenerating = checkGeneratingState();
-
-      // State changed from generating to idle
-      if (wasGenerating && !isGenerating) {
-        console.log('[ChatGPT Queue] Response complete, checking queue...');
-        // Delay before dispatching to ensure UI is ready
-        setTimeout(() => {
-          if (!checkGeneratingState() && messageQueue.length > 0) {
-            dispatchNextMessage();
-          }
-        }, dispatchDelay);
-      }
-
-      // Update UI to show current state
-      if (queueUI) {
-        queueUI.classList.toggle('generating', isGenerating);
-      }
-
-      // Update queue button visibility
-      updateQueueButton();
+      refreshGeneratingStateAndMaybeDispatch('mutation');
     });
 
     observer.observe(container, {
@@ -632,16 +767,19 @@
       attributeFilter: ['disabled', 'aria-label', 'class']
     });
 
-    console.log('[ChatGPT Queue] Observer set up');
+    observedContainer = container;
+    logInfo('Observer set up', { chatContainerSelector: SELECTORS.chatContainer });
   }
 
   // Handle URL changes (conversation switches)
   function handleUrlChange() {
     const newConversationId = getConversationId();
     if (newConversationId !== conversationId) {
+      const oldConversationId = conversationId;
       conversationId = newConversationId;
       loadQueue();
-      console.log(`[ChatGPT Queue] Switched to conversation: ${conversationId}`);
+      refreshGeneratingStateAndMaybeDispatch('url');
+      logInfo('Switched conversation', { from: oldConversationId, to: conversationId, url: location.href });
     }
   }
 
@@ -674,7 +812,7 @@
 
   // Initialize
   function init() {
-    console.log('[ChatGPT Queue] Initializing...');
+    logInfo('Initializing...', { url: location.href });
 
     conversationId = getConversationId();
     loadQueue();
@@ -689,6 +827,21 @@
     setupObserver();
     setupInputObserver();
 
+    // Fallback: poll state to avoid missing DOM transitions (SPA container replacement, etc.)
+    if (!fallbackPollerId) {
+      fallbackPollerId = setInterval(() => {
+        const currentContainer = document.querySelector(SELECTORS.chatContainer);
+        if (currentContainer && currentContainer !== observedContainer) {
+          logWarn('Chat container changed; re-attaching observer');
+          setupObserver();
+        }
+        refreshGeneratingStateAndMaybeDispatch('poll');
+      }, 1000);
+    }
+
+    // If we're already idle (e.g. page refreshed), still drain the queue.
+    refreshGeneratingStateAndMaybeDispatch('init');
+
     // Watch for URL changes (SPA navigation)
     let lastUrl = location.href;
     new MutationObserver(() => {
@@ -701,7 +854,7 @@
     // Also listen for popstate (back/forward)
     window.addEventListener('popstate', handleUrlChange);
 
-    console.log('[ChatGPT Queue] Initialized for conversation:', conversationId);
+    logInfo('Initialized', { conversationId, isGenerating, queueLength: messageQueue.length });
   }
 
   // Wait for page to be ready
